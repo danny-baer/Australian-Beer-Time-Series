@@ -1,0 +1,403 @@
+---
+title: "PSTAT 174 PROJECT"
+author: "Danny Baerman, Vela Hou, Lilian Li, Janelle Samansky, Andy Tran"
+date: "February 21, 2019"
+output: pdf_document
+---
+Libraries
+```{r}
+#Load Packages
+library(MASS)
+library(forecast)
+library(tseries)
+library(astsa)
+library(dse)
+library(knitr)
+library(gridExtra)
+library(grid)
+
+```
+
+
+Read in CSV, Initial Time Series Analaysis
+```{r}
+
+beer <- read.csv(file = "beer.csv",  header = TRUE, sep = ",", nrows = 146)[,-1]
+
+beerall <- read.csv(file = "beer.csv",  header = TRUE, sep = ",", nrows = 154)[,-1]
+
+ts.plot(beer, ylab = "Production in Megalitres",xlab = "Time(Quarterly)")
+title(expression(Beer~Production~In~Australia~March~1956~-~June~1992))
+
+
+```
+
+ACF and PACFs for Beer Production
+```{r}
+# Beer.ts with 8 points removed
+beer.ts <- ts(beer, frequency = 1)
+
+# Beer.ts with all points 
+beerall.ts <- ts(beerall, frequency = 1)
+
+acf(beer.ts, lag.max =10,main = "" )
+pacf(beer.ts, lag.max=10, main = "")
+```
+
+Seasonal Plot
+```{r}
+# Seasonal Plot
+seasonplot(beer.ts, 4, col=rainbow(3), year.labels = TRUE, main = "Seasonal~Plot")
+
+```
+
+Box Cox Transformations
+```{r}
+# Finding Lambda
+bcbeer <- boxcox(beer.ts~as.numeric(1:length(beer)))
+# Lambda
+lambda1 <- bcbeer$x[which.max(bcbeer$y)]
+# Lambda is 1/2
+# Log transformed data
+beer.tr <- beer.ts^(1/2)
+ts.plot(beer.ts, ylab = "Production in Megalitres",xlab = "Time(Quarterly)", main = "Box Cox Transformed Data")
+
+# Variance of nontransformed data
+var(beer.ts)
+# Variance of transformed data
+var(beer.tr)
+```
+
+
+Removing Trend and Seasonality
+```{r}
+# Differencing Seasonality at lag 4
+beerdiff4 <- diff(beer.tr, lag =4)
+var(beerdiff4)
+ts.plot(beerdiff4, ylab = "Differenced At Lag 4 ")
+abline(lm(beerdiff4~as.numeric(1:length( beerdiff4))), col ="red")
+
+# Differencing at Lag 1
+beerdiff4diff1 <- diff(beerdiff4, lag =1)
+var(beerdiff4diff1)
+ts.plot(beerdiff4diff1, ylab = "Differenced At Lag 4, Lag 1")
+abline(lm(beerdiff4diff1~as.numeric(1:length( beerdiff4diff1))), col ="red")
+
+
+```
+
+
+```{r}
+# Differenced at lag 4 PACF AND ACF
+par(mfrow=c(1,2))
+acf(beerdiff4, lag.max = 24, main = "")
+pacf(beerdiff4, lag.max = 24, main = "")
+
+# DIFFERENCED at lag 4 and lag 1 PACF AND ACF
+par(mfrow=c(1,2))
+acf(beerdiff4diff1, lag.max=24, main = "")
+pacf(beerdiff4diff1, lag.max=24, main = "")
+
+
+```
+
+Model Selection for SMA(1) 
+```{r}
+
+library(qpcR)
+AICc<-numeric()
+for (p in 0:5) {
+  for (q in 0:5) {
+    AICc<-round(c(AICc, sarima(beer.tr, p, 1, q, 0, 1, 1, 4, details = FALSE)$AICc),4)
+  }
+}
+
+AICc<-matrix(AICc, nrow = 6, byrow = TRUE)
+rownames(AICc)<-c("p=0","p=1","p=2", "p=3", "p=4", "p=5")
+colnames(AICc)<-c("q=0","q=1", "q=2", "q=3", "q=4", "q=5")
+AICc
+AICc<-data.frame(AICc)
+aicc<-setNames(AICc, c("q=0","q=1", "q=2", "q=3", "q=4", "q=5"))
+aicc
+grid.table(aicc)
+
+```
+
+
+
+```{r}
+
+BIC<-numeric()
+for (p in 0:5) {
+  for (q in 0:5) {
+    BIC<- round(c(BIC, sarima(beer.tr, p, 1, q, 0, 1, 1, 4, details = FALSE)$BIC),4)
+  }
+}
+
+BIC<-matrix(BIC, nrow = 6, byrow = TRUE)
+rownames(BIC)<-c("p=0","p=1","p=2", "p=3", "p=4", "p=5")
+colnames(BIC)<-c("q=0","q=1","q=2", "q=3", "q=4", "q=5")
+BIC
+bic<-data.frame(BIC)
+bic<-setNames(bic, c("q=0","q=1","q=2", "q=3", "q=4", "q=5"))
+
+library(grid)
+grid.table(bic)
+
+
+```
+From SMA(1) AIC selection, we select 
+
+Model Estimation for SMA(1) from AIC (0,1,2)X(1,1,0)4
+Model Estimation for SMA(1) from BIC (1,1,1)X(1,1,0)4
+
+
+```{r}
+
+mod1 <- arima(beer.tr, order = c(0,1,2), seasonal = list(order = c(0,1,1), period = 4))
+
+mod2 <- arima(beer.tr, order = c(1,1,1), seasonal = list(order = c(0,1,1), period = 4))
+
+mod1
+mod2
+```
+
+
+
+
+Checking Roots on both models
+```{r}
+#Script for roots
+plot.roots <- function(ar.roots=NULL, ma.roots=NULL, size=2, angles=FALSE, special=NULL, sqecial=NULL,my.pch=1,first.col="blue",
+second.col="red",main=NULL)
+{xylims <- c(-size,size)
+omegas <- seq(0,2*pi,pi/500)
+temp <- exp(complex(real=rep(0,length(omegas)),imag=omegas))
+plot(Re(temp),Im(temp),typ="l",xlab="x",ylab="y",xlim=xylims,ylim=xylims,main=main)
+abline(v=0,lty="dotted")
+abline(h=0,lty="dotted")
+if(!is.null(ar.roots))
+{
+points(Re(1/ar.roots),Im(1/ar.roots),col=first.col,pch=my.pch)
+points(Re(ar.roots),Im(ar.roots),col=second.col,pch=my.pch)
+}
+if(!is.null(ma.roots))
+{
+points(Re(1/ma.roots),Im(1/ma.roots),pch="*",cex=1.5,col=first.col)
+points(Re(ma.roots),Im(ma.roots),pch="*",cex=1.5,col=second.col)
+}
+if(angles)
+{
+if(!is.null(ar.roots))
+{
+abline(a=0,b=Im(ar.roots[1])/Re(ar.roots[1]),lty="dotted")
+abline(a=0,b=Im(ar.roots[2])/Re(ar.roots[2]),lty="dotted")
+}
+if(!is.null(ma.roots))
+{
+sapply(1:length(ma.roots), function(j) abline(a=0,b=Im(ma.roots[j])/Re(ma.roots[j]),
+lty="dotted"))
+}
+}
+if(!is.null(special))
+{
+lines(Re(special),Im(special),lwd=2)
+}
+if(!is.null(sqecial))
+{
+lines(Re(sqecial),Im(sqecial),lwd=2)
+}
+}
+
+```
+
+
+```{r}
+
+# Plotting Roots for Both Models
+par(mfrow = c(1,3))
+plot.roots(NULL, polyroot (c(1,-0.9663,0.4146)) , main ="Model I MA part")
+plot.roots(NULL, polyroot (c (1,0.8019)) , main ="Model I SMA part")
+par(mfrow = c(1,3))
+plot.roots(NULL, polyroot (c(1,-0.4926)) , main =" Model II MA part")
+plot.roots(NULL, polyroot (c(1,-0.4229)) , main =" Model II AR part")
+plot.roots(NULL, polyroot (c(1, 0.7603)) , main =" Model II SMA part ")
+# normality
+par(mfrow = c(2,2))
+
+```
+
+Model1:SARIMA(0,1,2)x(0,1,1)4
+AICc = -0.9514499 BIC = -1.905785	
+Xt = Zt-0.97Zt-1 + 0.41Zt-2 
+NABLA(4)NABLA(Yt) = (1+0.97B-0.41B^2-0.80B^4)
+
+Model 2:SARIMA(1,1,1)x(0,1,1)4
+AICc = -0.9171915	BIC = -1.871526
+
+
+
+Model Diagnostics 1
+```{r}
+
+# Residual Plot Model 1
+ts.plot(mod1$residuals, main = "Model 1 Residuals")
+
+
+```
+
+
+```{r}
+
+par(mfrow=c(1,2),oma=c(0,0,2,0))
+op <- par(mfrow=c(2,2))
+
+acf(mod1$residuals, main = "", lag.max = 24)
+pacf(mod1$residuals, main = "", lag.max= 24)
+# histogram
+hist(mod1$residuals, main = "Histogram of Residuals for Model 1")
+# qq plot
+qqnorm(mod1$residuals, main = "Normal QQ Plot for Model 1")
+qqline(mod1$residuals)
+
+title("Model 1 Diagnostics", outer=TRUE)
+par(op)
+
+
+#Normality Tests
+shapiro.test(mod1$residuals)
+Box.test(mod1$residuals, lag =4, type = "Box-Pierce", fitdf =2)
+Box.test(mod1$residuals, lag =4, type = "Ljung-Box", fitdf =2)
+```
+
+Model 2 Diagnostics
+```{r}
+
+# Residual Plot Model 2
+ts.plot(mod1$residuals, main = "Model 2 Residuals")
+
+```
+
+
+```{r}
+
+#Model 2 Diagnostics
+par(mfrow=c(1,2),oma=c(0,0,2,0))
+op <- par(mfrow=c(2,2))
+
+acf(mod2$residuals, main = "", lag.max = 24)
+pacf(mod2$residuals, main = "", lag.max=24)
+# histogram
+hist(mod2$residuals, main = "Histogram of Residuals for Model 2")
+# qq plot
+qqnorm(mod2$residuals, main = "Normal QQ Plot for Model 2")
+qqline(mod2$residuals)
+
+title("Model 2 Diagnostics", outer=TRUE)
+par(op)
+
+
+#Normality Tests
+shapiro.test(mod2$residuals)
+Box.test(mod2$residuals, lag =4, type = "Box-Pierce", fitdf =2)
+Box.test(mod2$residuals, lag =4, type = "Ljung-Box", fitdf =2)
+
+```
+
+Forecasting
+
+```{r}
+
+# Predictions on Transformed Data
+
+pred.log <- predict(mod1, n.ahead=8)
+
+upper.log <- pred.log$pred + 2*pred.log$se 
+lower.log <- pred.log$pred - 2*pred.log$se
+
+ts.plot(beer.tr, xlim=c(1, length(beer.tr)+8), main = "Forecasting on Transformed Data", ylab= "y^(0.5)")
+
+lines(upper.log, col="blue", lty = "dashed")
+lines(lower.log, col="blue", lty = "dashed")
+
+points((length(beer.tr)+1):(length(beer.tr)+8), pred.log$pred, col ="red")
+
+# Add a legend
+legend("bottomright", 
+  legend = c("Prediction"), 
+  col = c("red"), 
+  pch = 1, 
+  bty = "o", 
+  pt.cex = 1, 
+  cex = 1, 
+  text.col = "black", 
+  horiz = F , 
+  inset = c(0.1, 0.1))
+```
+
+
+```{r}
+
+# Predictions on Original Data
+
+pred.original <- pred.log$pred^(1/0.5)
+
+
+upper <-upper.log^(1/0.5)
+lower <-lower.log^(1/0.5)
+
+ts.plot(beer.ts, xlim=c(1, length(beer.ts)+8), main = "Forecasting on Original Data", ylab= "Production in Megalitres")
+
+lines(upper, col="blue", lty = "dashed")
+lines(lower, col="blue", lty = "dashed")
+
+points((length(beer.ts)+1):(length(beer.ts)+8), pred.original, col ="red")
+
+# Add a legend
+legend("bottomright", 
+  legend = c("Prediction"), 
+  col = c("red"), 
+  pch = 1, 
+  bty = "o", 
+  pt.cex = 1, 
+  cex = 1, 
+  text.col = "black", 
+  horiz = F , 
+  inset = c(0.1, 0.1))
+
+
+```
+
+```{r}
+
+# zOOM Foreast
+
+ts.plot(beerall.ts, xlim = c(length(beerall.ts)-12, length(beerall.ts)), main = "Observed vs Forecasted Values", ylab = "Production in Megalitres")
+
+# Points for Original Data *
+points((length(beer.ts)+1):(length(beer.ts)+8), beerall.ts[147:154], col ="blue")
+
+# Points for Forecasted Data Red
+points((length(beer.ts)+1):(length(beer.ts)+8), pred.original, col ="red")
+
+lines((length(beer.ts)+1): (length(beer.ts)+8), upper, lty=2, col = "blue")
+
+lines((length(beer.ts)+1): (length(beer.ts)+8), lower, lty=2, col = "blue")
+
+# Add a legend
+legend("bottomright", 
+  legend = c("Prediction", "Observed"), 
+  col = c("red", 
+  "blue"), 
+  pch = 1, 
+  bty = "o", 
+  pt.cex = 1, 
+  cex = 1, 
+  text.col = "black", 
+  horiz = F , 
+  inset = c(0.1, 0.1))
+
+```
+
+
+
